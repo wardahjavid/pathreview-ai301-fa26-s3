@@ -18,8 +18,18 @@ async def create_profile(
     resume_filename: str = None,
     resume_text: str = None,
 ) -> Profile:
-    """
-    Create a new profile for a user.
+    """Create a new profile for a user.
+
+    Args:
+        db: Async database session used to add and commit the profile.
+        user_id: ID of the user who will own the profile.
+        data: Profile fields from the request (GitHub username and
+            portfolio URL).
+        resume_filename: Original filename of the uploaded resume, if any.
+        resume_text: Extracted text of the uploaded resume, if any.
+
+    Returns:
+        The newly created profile, refreshed from the database.
     """
     profile = Profile(
         user_id=user_id,
@@ -39,8 +49,16 @@ async def get_profile(
     profile_id: UUID,
     user_id: UUID,
 ) -> Profile | None:
-    """
-    Get a profile by ID, checking ownership.
+    """Get a profile by ID, checking that the user owns it.
+
+    Args:
+        db: Async database session used for the query.
+        profile_id: ID of the profile to fetch.
+        user_id: ID of the user who must own the profile.
+
+    Returns:
+        The matching profile, or None if no profile with this ID
+        belongs to the user.
     """
     stmt = select(Profile).where((Profile.id == profile_id) & (Profile.user_id == user_id))
     result = await db.execute(stmt)
@@ -53,8 +71,19 @@ async def update_profile(
     user_id: UUID,
     data: ProfileUpdate,
 ) -> Profile | None:
-    """
-    Update a profile, checking ownership.
+    """Update a profile, checking that the user owns it.
+
+    Only fields that are set (not None) in ``data`` are changed.
+
+    Args:
+        db: Async database session used to save the changes.
+        profile_id: ID of the profile to update.
+        user_id: ID of the user who must own the profile.
+        data: New field values; fields left as None are not changed.
+
+    Returns:
+        The updated profile, refreshed from the database, or None if no
+        profile with this ID belongs to the user.
     """
     profile = await get_profile(db, profile_id, user_id)
     if not profile:
@@ -76,9 +105,21 @@ async def delete_profile(
     profile_id: UUID,
     user_id: UUID,
 ) -> bool:
-    """
-    Delete a profile and cascade delete reviews and ingested sources.
-    Returns True if deleted, False if not found.
+    """Delete a profile and cascade delete its reviews and ingested sources.
+
+    Args:
+        db: Async database session used for the deletes.
+        profile_id: ID of the profile to delete.
+        user_id: ID of the user who must own the profile.
+
+    Returns:
+        True if the profile and its related records were deleted, False
+        if no profile with this ID belongs to the user.
+
+    Raises:
+        Exception: Any error raised while deleting the related records or
+            the profile. The session is rolled back and the original
+            exception is re-raised.
     """
     profile = await get_profile(db, profile_id, user_id)
     if not profile:
