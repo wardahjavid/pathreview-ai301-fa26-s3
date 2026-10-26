@@ -18,8 +18,17 @@ async def create_review(
     profile_id: UUID,
     user_id: UUID,
 ) -> Review:
-    """
-    Create a new review with status="pending".
+    """Create a new review for a profile with status="pending".
+
+    Args:
+        db: Async database session used to add and commit the review.
+        profile_id: ID of the profile the review is for.
+        user_id: ID of the requesting user. Currently unused: this function
+            does not check that the user owns the profile (see #67).
+
+    Returns:
+        The newly created review, refreshed from the database, with no
+        sections and no overall score yet.
     """
     review = Review(
         profile_id=profile_id,
@@ -38,8 +47,16 @@ async def get_review(
     review_id: UUID,
     user_id: UUID,
 ) -> Review | None:
-    """
-    Get a review by ID, checking that it belongs to the user's profile.
+    """Get a review by ID, checking that it belongs to the user's profile.
+
+    Args:
+        db: Async database session used for the query.
+        review_id: ID of the review to fetch.
+        user_id: ID of the user whose profile must own the review.
+
+    Returns:
+        The matching review, or None if no review with this ID belongs to
+        one of the user's profiles.
     """
     stmt = (
         select(Review).join(Profile).where(and_(Review.id == review_id, Profile.user_id == user_id))
@@ -54,9 +71,18 @@ async def list_reviews(
     page: int = 1,
     page_size: int = 20,
 ) -> tuple[list[Review], int]:
-    """
-    List reviews for a user with pagination.
-    Returns (reviews, total_count).
+    """List a user's reviews, newest first, one page at a time.
+
+    Args:
+        db: Async database session used for the queries.
+        user_id: ID of the user whose reviews to list.
+        page: 1-based page number. Defaults to 1.
+        page_size: Number of reviews per page. Defaults to 20.
+
+    Returns:
+        A tuple ``(reviews, total_count)``: the reviews on the requested
+        page, ordered by creation time with the newest first, and the
+        total number of reviews the user has across all pages.
     """
     offset = (page - 1) * page_size
 
@@ -85,8 +111,8 @@ async def process_review(
     review_id: UUID,
     profile_id: UUID,
 ) -> None:
-    """
-    Background task to process a review.
+    """Process a review as a background task.
+
     Steps:
     1. Set status="processing"
     2. Run ingestion pipeline on profile's sources
@@ -95,6 +121,19 @@ async def process_review(
     5. Run safety checks on output
     6. Set status="complete", store sections in review.sections
     7. On exception: set status="failed", log error
+
+    The function also returns early without raising: if the review is not
+    found (nothing is changed), if the profile is not found, or if the
+    safety checks fail (the review is set to "failed" in both cases).
+
+    Args:
+        db: Async database session used to read and update the review.
+        review_id: ID of the review to process.
+        profile_id: ID of the profile whose sources are processed.
+
+    Returns:
+        None. The outcome is recorded on the review's status ("complete"
+        or "failed"), sections, and overall score.
     """
     try:
         # Get the review
